@@ -1,15 +1,15 @@
-// src/api/sportsdata.js
-// This module is responsible for all interactions with the sportsdata.io API.
 
-// Note: The API key will be injected by the environment setup (react-native-dotenv)
-// and passed to the functions from a central configuration file.
+
+
+
+
 
 const API_BASE_URLS = {
     SCORES: "https://api.sportsdata.io/v4/soccer/scores/json",
     PROJECTIONS: "https://api.sportsdata.io/v4/soccer/projections/json",
 };
 
-// The free trial for sportsdata.io is limited to the UEFA Champions League (Competition ID = 3)
+
 const COMPETITION_ID = 3;
 const MAX_RETRIES = 3; // Reduced for mobile context to avoid long waits
 
@@ -78,7 +78,7 @@ export async function getTodayMatches(apiKey) {
     const url = `${API_BASE_URLS.SCORES}/ScoresBasic/${COMPETITION_ID}/${today}?key=${apiKey}`;
     const matchesToday = await fetchWithRetry(url);
 
-    // Map to a cleaner, more consistent format
+
     return matchesToday.map(match => ({
         gameId: match.GameId,
         dateTime: match.DateTime,
@@ -126,7 +126,7 @@ export async function getCompetitionInjured(apiKey) {
  */
 export async function getPlayersByTeam(teamId, apiKey) {
     if (!teamId) throw new Error("A valid teamId must be provided.");
-    const url = `${API_BASE_URLS.SCORES}/PlayersByTeam/${teamId}?key=${apiKey}`;
+    const url = `${API_BASE_URLS.SCORES}/PlayersByTeam/3/${teamId}?key=${apiKey}`;
     const playersByTeam = await fetchWithRetry(url);
 
     return playersByTeam.map(player => ({

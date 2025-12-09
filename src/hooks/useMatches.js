@@ -2,38 +2,42 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getCache, setCache } from '../services/cache';
 import { getTodayMatches, getCompetitionInjured, getPlayersByTeam } from '../api/sportsdata';
-import { generatePredictions } from '../api/gemini';
 import { SPORTS_API_KEY, GEMINI_API_KEY } from '@env';
 
-// --- CONSTANTS ---
+if(!GEMINI_API_KEY) {
+    console.error('GEMINI_API_KEY no está definida. Las predicciones no van a funcionar.');
+}
+
+// --- CONSTANTES ---
 const CACHE_KEYS = {
     MATCHES: 'matches_cache',
     INJURIES: 'injuries_cache',
-    PLAYERS_HOME: 'players_home_cache', // Using dynamic keys for players
-    PLAYERS_AWAY: 'players_away_cache', // Using dynamic keys for players
-    PREDICTIONS: 'predictions_cache', // Using dynamic keys for predictions
+    PLAYERS_HOME: 'players_home_cache', // Usamos claves dinámicas para los jugadores
+    PLAYERS_AWAY: 'players_away_cache', // Usamos claves dinámicas para los jugadores
+    PREDICTIONS: 'predictions_cache', // Usamos claves dinámicas para las predicciones
 };
 const CACHE_TTL = {
-    // 24 hours for data that is not expected to change often
+    // 24 horas para datos que no deberían cambiar mucho
     STATIC: 24 * 60 * 60 * 1000,
-    // 5 minutes for match data that could change status
+    // 5 minutos para datos de partidos que pueden cambiar de estado
     DYNAMIC: 5 * 60 * 1000,
 };
 
 /**
- * Custom hook to manage fetching, caching, and state for match data.
+ * Hook personalizado para manejar la carga, caché y estado de los datos de partidos.
  */
 export const useMatches = () => {
     const [matches, setMatches] = useState([]);
+    const [injuredPlayers, setInjuredPlayers] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
     const [lastFetch, setLastFetch] = useState(null);
 
     /**
-     * Checks if cached data is still valid based on its TTL.
-     * @param {number} timestamp - The timestamp of the cached data.
-     * @param {number} ttl - The time-to-live in milliseconds.
-     * @returns {boolean} - True if the cache is fresh, false otherwise.
+     * Revisa si los datos en caché todavía sirven, basándose en su TTL.
+     * @param {number} timestamp - La marca de tiempo de los datos en caché.
+     * @param {number} ttl - El tiempo de vida en milisegundos.
+     * @returns {boolean} - True si la caché está fresca, false si no.
      */
     const isCacheFresh = (timestamp, ttl) => {
         if (!timestamp) return false;
@@ -41,49 +45,48 @@ export const useMatches = () => {
     };
 
     /**
-     * Main function to fetch all required data, using cache where possible.
+     * Función principal que trae todos los datos necesarios, usando la caché si se puede.
      */
     const loadMatchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
 
         try {
-            // 1. Fetch Matches (Dynamic Cache)
+            // 1. Traer Partidos (Caché Dinámica)
             const cachedMatches = await getCache(CACHE_KEYS.MATCHES);
             let freshMatches = [];
 
             if (isCacheFresh(cachedMatches.timestamp, CACHE_TTL.DYNAMIC)) {
-                console.log('[useMatches] Using cached matches.');
+                console.log('[useMatches] Usando partidos de la caché.');
                 freshMatches = cachedMatches.data;
                 setLastFetch(cachedMatches.timestamp);
             } else {
-                console.log('[useMatches] Fetching fresh matches from API.');
+                console.log('[useMatches] Pidiendo partidos nuevos a la API.');
                 freshMatches = await getTodayMatches(SPORTS_API_KEY);
                 await setCache(CACHE_KEYS.MATCHES, freshMatches);
                 setLastFetch(Date.now());
             }
-            setMatches(freshMatches);
-
-            // 2. Fetch Injured Players (Static Cache)
+            
+            // 2. Traer Jugadores Lesionados (Caché Estática)
             const cachedInjuries = await getCache(CACHE_KEYS.INJURIES);
-            let injuredPlayers = [];
             if (isCacheFresh(cachedInjuries.timestamp, CACHE_TTL.STATIC)) {
-                console.log('[useMatches] Using cached injuries.');
-                injuredPlayers = cachedInjuries.data;
+                console.log('[useMatches] Usando lesiones de la caché.');
+                setInjuredPlayers(cachedInjuries.data);
             } else {
-                console.log('[useMatches] Fetching fresh injury data from API.');
-                injuredPlayers = await getCompetitionInjured(SPORTS_API_KEY);
-                await setCache(CACHE_KEYS.INJURIES, injuredPlayers);
+                console.log('[useMatches] Pidiendo datos de lesiones a la API.');
+                const freshInjuries = await getCompetitionInjured(SPORTS_API_KEY);
+                setInjuredPlayers(freshInjuries);
+                await setCache(CACHE_KEYS.INJURIES, freshInjuries);
             }
 
-            // 3. Sequentially fetch player lists and predictions for each match
-            // This is done to avoid overwhelming the user's device and the APIs.
-            const matchesWithDetails = await Promise.all(
+            // 3. Traer secuencialmente las listas de jugadores para cada partido
+            // Se hace así para no reventar el móvil del usuario ni las APIs.
+            const matchesWithPlayers = await Promise.all(
                 freshMatches.map(async (match) => {
                     const homeTeamId = match.homeTeam.id;
                     const awayTeamId = match.awayTeam.id;
 
-                    // Fetch players for home team
+                    // Traer jugadores del equipo local
                     const homePlayersCacheKey = `${CACHE_KEYS.PLAYERS_HOME}_${homeTeamId}`;
                     const cachedHomePlayers = await getCache(homePlayersCacheKey);
                     let homePlayers = [];
@@ -94,7 +97,7 @@ export const useMatches = () => {
                         await setCache(homePlayersCacheKey, homePlayers);
                     }
 
-                    // Fetch players for away team
+                    // Traer jugadores del equipo visitante
                     const awayPlayersCacheKey = `${CACHE_KEYS.PLAYERS_AWAY}_${awayTeamId}`;
                     const cachedAwayPlayers = await getCache(awayPlayersCacheKey);
                     let awayPlayers = [];
@@ -105,46 +108,31 @@ export const useMatches = () => {
                         await setCache(awayPlayersCacheKey, awayPlayers);
                     }
 
-                    // Fetch predictions from Gemini
-                    const predictionsCacheKey = `${CACHE_KEYS.PREDICTIONS}_${match.gameId}`;
-                    const cachedPredictions = await getCache(predictionsCacheKey);
-                    let predictions = null;
-                    // Predictions are generated once and should not expire before the match
-                    if (cachedPredictions.data) {
-                        predictions = cachedPredictions.data;
-                    } else {
-                        const matchDataForGemini = { match, homePlayers, awayPlayers, injuredPlayers };
-                        predictions = await generatePredictions(GEMINI_API_KEY, matchDataForGemini);
-                        if (predictions) {
-                            await setCache(predictionsCacheKey, predictions);
-                        }
-                    }
-
-                    return { ...match, predictions };
+                    return { ...match, homePlayers, awayPlayers };
                 })
             );
 
-            setMatches(matchesWithDetails);
+            setMatches(matchesWithPlayers);
 
         } catch (e) {
-            console.error('[useMatches] Failed to load match data:', e);
-            setError(e.message || 'An unknown error occurred.');
-            // Fallback to cached matches if API fails but cache exists
+            console.error('[useMatches] Fallo al cargar los datos del partido:', e);
+            setError(e.message || 'Ocurrió un error desconocido.');
+            // Si la API falla pero hay caché, mostramos los datos viejos
             const cachedMatches = await getCache(CACHE_KEYS.MATCHES);
             if (cachedMatches.data) {
                 setMatches(cachedMatches.data);
-                setError("API failed. Displaying stale data.");
+                setError("La API falló. Mostrando datos no actualizados.");
             }
         } finally {
             setIsLoading(false);
         }
     }, []);
 
-    // Initial load on component mount
+    // Carga inicial cuando el componente se monta
     useEffect(() => {
         loadMatchData();
     }, [loadMatchData]);
 
-    // Expose state and a manual refresh function to the component
-    return { matches, isLoading, error, lastFetch, refreshMatches: loadMatchData };
+    // Exponemos el estado y una función para refrescar a mano
+    return { matches, injuredPlayers, isLoading, error, lastFetch, refreshMatches: loadMatchData };
 };

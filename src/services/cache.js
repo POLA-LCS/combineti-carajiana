@@ -1,6 +1,6 @@
-// src/services/cache.js
-// A generic cache service built on top of AsyncStorage.
-// It stores and retrieves JSON data with timestamps.
+
+
+
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
