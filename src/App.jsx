@@ -592,7 +592,6 @@ function MainApp() {
 
 export default function App() {
     return (
-        // Provider necesario para el SafeAreaContext
         <SafeAreaProvider>
             <MainApp />
         </SafeAreaProvider>
